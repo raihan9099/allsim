@@ -1,4 +1,3 @@
-// server.js
 require('dotenv').config();
 process.on('uncaughtException', (e) => { console.error('Uncaught:', e.message); });
 process.on('unhandledRejection', (e) => { console.error('Rejection:', e); });
@@ -6,117 +5,145 @@ process.on('unhandledRejection', (e) => { console.error('Rejection:', e); });
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
-const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
+const Database = require('better-sqlite3');
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIO(server);
 
 const PORT = process.env.PORT || 3000;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://Milowitz_ok_fine1100:IJ5oodf0RHxM9H4S@cluster0.ns0lcvd.mongodb.net/sim_offers?retryWrites=true&w=majority';
+const db = new Database('simoffers.db');
+
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    isAdmin INTEGER DEFAULT 0,
+    lastSeen TEXT,
+    isOnline INTEGER DEFAULT 0,
+    createdAt TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender TEXT NOT NULL,
+    receiver TEXT NOT NULL,
+    message TEXT NOT NULL,
+    type TEXT DEFAULT 'text',
+    fileUrl TEXT,
+    seen INTEGER DEFAULT 0,
+    timestamp TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS offers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sim TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    price TEXT,
+    validity TEXT,
+    data TEXT,
+    minutes TEXT,
+    sms TEXT,
+    category TEXT,
+    image TEXT,
+    featured INTEGER DEFAULT 0,
+    active INTEGER DEFAULT 1,
+    createdAt TEXT DEFAULT (datetime('now'))
+  );
+`);
 
 app.use(express.json());
-app.use(express.static('public'));
-app.use('/assets', express.static('assets'));
+app.use(express.static(path.join(__dirname)));
 
-['public', 'assets'].forEach(dir => {
+['uploads'].forEach(dir => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
 const simImages = {
-  banglalink: '/assets/Banglalink.jpg',
-  airtel: '/assets/airtel.jpg',
-  grameenphone: '/assets/grameenphone.jpg',
-  robi: '/assets/robi.jpg'
+  banglalink: '/Banglalink.jpg',
+  airtel: '/airtel.jpg',
+  grameenphone: '/grameenphone.jpg',
+  robi: '/robi.jpg'
 };
 
-const User = mongoose.model('User', new mongoose.Schema({
-  name: String,
-  email: { type: String, unique: true },
-  password: String,
-  isAdmin: { type: Boolean, default: false },
-  lastSeen: Date,
-  isOnline: { type: Boolean, default: false },
-  createdAt: { type: Date, default: Date.now }
-}));
-
-const Message = mongoose.model('Message', new mongoose.Schema({
-  sender: String,
-  receiver: String,
-  message: String,
-  type: { type: String, default: 'text' },
-  fileUrl: String,
-  seen: { type: Boolean, default: false },
-  timestamp: { type: Date, default: Date.now }
-}));
-
-const Offer = mongoose.model('Offer', new mongoose.Schema({
-  sim: String,
-  title: String,
-  description: String,
-  price: String,
-  validity: String,
-  data: String,
-  minutes: String,
-  sms: String,
-  category: String,
-  image: String,
-  featured: { type: Boolean, default: false },
-  active: { type: Boolean, default: true },
-  createdAt: { type: Date, default: Date.now }
-}));
-
-mongoose.connect(MONGO_URI)
-  .then(async () => {
-    console.log('✅ MongoDB connected');
-    const adminEmail = 'admin@simoffers.com';
-    const admin = await User.findOne({ email: adminEmail });
-    if (!admin) {
-      const hashedPassword = await bcrypt.hash('Admin@2024!', 10);
-      await User.create({
-        name: 'SIM Offers Admin',
-        email: adminEmail,
-        password: hashedPassword,
-        isAdmin: true
-      });
-      console.log('✅ Admin user created');
-    }
-    await seedOffers();
-  })
-  .catch(e => console.error('❌ MongoDB error:', e.message));
-
-async function seedOffers() {
-  const count = await Offer.countDocuments();
-  if (count === 0) {
-    const offers = [
-      { sim: 'banglalink', title: '🔥 Unlimited Internet', description: 'Get unlimited internet for 7 days', price: '৳99', validity: '7 Days', data: 'Unlimited', minutes: '100 Min', sms: '50 SMS', category: 'Internet', image: simImages.banglalink, featured: true },
-      { sim: 'banglalink', title: '🎮 Gaming Pack', description: 'Special gaming data pack', price: '৳49', validity: '3 Days', data: '2 GB', minutes: '50 Min', sms: '20 SMS', category: 'Gaming', image: simImages.banglalink, featured: true },
-      { sim: 'grameenphone', title: '⭐ Super Saver', description: 'Best value pack for all', price: '৳199', validity: '30 Days', data: '10 GB', minutes: '300 Min', sms: '100 SMS', category: 'Combo', image: simImages.grameenphone, featured: true },
-      { sim: 'grameenphone', title: '📱 Social Pack', description: 'Unlimited social media', price: '৳79', validity: '7 Days', data: '5 GB', minutes: '75 Min', sms: '30 SMS', category: 'Social', image: simImages.grameenphone, featured: true },
-      { sim: 'robi', title: '💎 Diamond Offer', description: 'Premium package for you', price: '৳299', validity: '30 Days', data: '15 GB', minutes: '500 Min', sms: '200 SMS', category: 'Premium', image: simImages.robi, featured: true },
-      { sim: 'robi', title: '🌙 Night Owl', description: 'Special night data pack', price: '৳39', validity: '1 Day', data: '3 GB', minutes: '20 Min', sms: '10 SMS', category: 'Night', image: simImages.robi, featured: false },
-      { sim: 'airtel', title: '🚀 Turbo Boost', description: 'High-speed data pack', price: '৳149', validity: '15 Days', data: '8 GB', minutes: '200 Min', sms: '80 SMS', category: 'Internet', image: simImages.airtel, featured: true },
-      { sim: 'airtel', title: '🎵 Music Stream', description: 'Unlimited music streaming', price: '৳59', validity: '5 Days', data: '3 GB', minutes: '40 Min', sms: '15 SMS', category: 'Entertainment', image: simImages.airtel, featured: false },
-      { sim: 'banglalink', title: '📞 Call Master', description: 'Unlimited calls pack', price: '৳129', validity: '14 Days', data: '1 GB', minutes: 'Unlimited', sms: '50 SMS', category: 'Voice', image: simImages.banglalink, featured: false },
-      { sim: 'grameenphone', title: '🎬 Video Plus', description: 'Unlimited video streaming', price: '৳89', validity: '7 Days', data: '6 GB', minutes: '60 Min', sms: '25 SMS', category: 'Entertainment', image: simImages.grameenphone, featured: true },
-      { sim: 'robi', title: '💼 Business Pack', description: 'For business professionals', price: '৳399', validity: '30 Days', data: '20 GB', minutes: '800 Min', sms: '300 SMS', category: 'Business', image: simImages.robi, featured: false },
-      { sim: 'airtel', title: '🌟 Star Offer', description: 'Popular value pack', price: '৳249', validity: '28 Days', data: '12 GB', minutes: '400 Min', sms: '150 SMS', category: 'Combo', image: simImages.airtel, featured: true }
-    ];
-    await Offer.insertMany(offers);
-    console.log('✅ Sample offers created');
+(async () => {
+  const adminEmail = 'admin@simoffers.com';
+  const admin = db.prepare('SELECT * FROM users WHERE email = ?').get(adminEmail);
+  
+  if (!admin) {
+    const hashedPassword = await bcrypt.hash('Admin@2024!', 10);
+    db.prepare('INSERT INTO users (name, email, password, isAdmin) VALUES (?, ?, ?, 1)').run('SIM Offers Admin', adminEmail, hashedPassword);
+    console.log('Admin user created');
   }
-}
 
-app.get('/', async (req, res) => {
-  const offers = await Offer.find({ active: true }).sort({ featured: -1, createdAt: -1 }).lean();
+  const offerCount = db.prepare('SELECT COUNT(*) as count FROM offers').get();
+  if (offerCount.count === 0) {
+    const insertOffer = db.prepare('INSERT INTO offers (sim, title, description, price, validity, data, minutes, sms, category, image, featured) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    
+    const offers = [
+      ['banglalink', 'Unlimited Internet', 'Get unlimited internet for 7 days', '99', '7 Days', 'Unlimited', '100 Min', '50 SMS', 'Internet', simImages.banglalink, 1],
+      ['banglalink', 'Gaming Pack', 'Special gaming data pack', '49', '3 Days', '2 GB', '50 Min', '20 SMS', 'Gaming', simImages.banglalink, 1],
+      ['banglalink', 'Call Master', 'Unlimited calls pack', '129', '14 Days', '1 GB', 'Unlimited', '50 SMS', 'Voice', simImages.banglalink, 0],
+      ['grameenphone', 'Super Saver', 'Best value pack for all', '199', '30 Days', '10 GB', '300 Min', '100 SMS', 'Combo', simImages.grameenphone, 1],
+      ['grameenphone', 'Social Pack', 'Unlimited social media', '79', '7 Days', '5 GB', '75 Min', '30 SMS', 'Social', simImages.grameenphone, 1],
+      ['grameenphone', 'Video Plus', 'Unlimited video streaming', '89', '7 Days', '6 GB', '60 Min', '25 SMS', 'Entertainment', simImages.grameenphone, 1],
+      ['robi', 'Diamond Offer', 'Premium package for you', '299', '30 Days', '15 GB', '500 Min', '200 SMS', 'Premium', simImages.robi, 1],
+      ['robi', 'Night Owl', 'Special night data pack', '39', '1 Day', '3 GB', '20 Min', '10 SMS', 'Night', simImages.robi, 0],
+      ['robi', 'Business Pack', 'For business professionals', '399', '30 Days', '20 GB', '800 Min', '300 SMS', 'Business', simImages.robi, 0],
+      ['airtel', 'Turbo Boost', 'High-speed data pack', '149', '15 Days', '8 GB', '200 Min', '80 SMS', 'Internet', simImages.airtel, 1],
+      ['airtel', 'Music Stream', 'Unlimited music streaming', '59', '5 Days', '3 GB', '40 Min', '15 SMS', 'Entertainment', simImages.airtel, 0],
+      ['airtel', 'Star Offer', 'Popular value pack', '249', '28 Days', '12 GB', '400 Min', '150 SMS', 'Combo', simImages.airtel, 1]
+    ];
+
+    const insertMany = db.transaction((offers) => {
+      for (const offer of offers) {
+        insertOffer.run(...offer);
+      }
+    });
+    insertMany(offers);
+    console.log('Sample offers created');
+  }
+})();
+
+app.get('/', (req, res) => {
+  const offers = db.prepare('SELECT * FROM offers WHERE active = 1 ORDER BY featured DESC, createdAt DESC').all();
   const featuredOffers = offers.filter(o => o.featured).slice(0, 4);
   const banglalinkOffers = offers.filter(o => o.sim === 'banglalink').slice(0, 4);
   const gpOffers = offers.filter(o => o.sim === 'grameenphone').slice(0, 4);
   const robiOffers = offers.filter(o => o.sim === 'robi').slice(0, 4);
   const airtelOffers = offers.filter(o => o.sim === 'airtel').slice(0, 4);
+
+  function renderOfferCard(offer, featured = false) {
+    return `
+    <div class="offer-card ${featured ? 'featured' : ''}">
+      <div class="offer-sim">
+        <img src="${offer.image}" alt="${offer.sim}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2236%22 height=%2236%22><rect fill=%22%236C5CE7%22 width=%2236%22 height=%2236%22 rx=%2218%22/><text fill=%22white%22 x=%2218%22 y=%2224%22 text-anchor=%22middle%22 font-size=%2216%22>${offer.sim.charAt(0).toUpperCase()}</text></svg>'">
+        <span>${offer.sim}</span>
+      </div>
+      <div class="offer-title">${offer.title}</div>
+      <div class="offer-desc">${offer.description}</div>
+      <div class="offer-features">
+        <div class="offer-feature"><span class="icon">📱</span> ${offer.data}</div>
+        <div class="offer-feature"><span class="icon">📞</span> ${offer.minutes}</div>
+        <div class="offer-feature"><span class="icon">💬</span> ${offer.sms}</div>
+        <div class="offer-feature"><span class="icon">📅</span> ${offer.validity}</div>
+      </div>
+      <div class="offer-bottom">
+        <div class="offer-price">৳${offer.price}</div>
+        <div class="offer-validity">${offer.validity}</div>
+      </div>
+      <button class="offer-btn" onclick="alert('Offer: ${offer.title}\\nPrice: ৳${offer.price}\\nValidity: ${offer.validity}')">Get This Offer</button>
+    </div>`;
+  }
 
   res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -124,7 +151,7 @@ app.get('/', async (req, res) => {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#6C5CE7">
-<title>📱 SIM Offers BD - All Operator Best Deals 2024</title>
+<title>SIM Offers BD - All Operator Best Deals 2024</title>
 <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@300;400;500;600;700&family=Righteous&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -656,22 +683,22 @@ body {
 <div class="particles" id="particles"></div>
 <nav class="nav">
   <div class="nav-inner">
-    <a href="/" class="logo">📱 SIM Offers</a>
+    <a href="/" class="logo">SIM Offers</a>
     <div class="nav-links">
       <a href="#banglalink">Banglalink</a>
       <a href="#grameenphone">Grameenphone</a>
       <a href="#robi">Robi</a>
       <a href="#airtel">Airtel</a>
-      <a href="/messenger" class="chat-btn">💬 Support</a>
+      <a href="/messenger" class="chat-btn">Support</a>
     </div>
   </div>
 </nav>
 <section class="hero">
-  <div class="hero-badge">🔥 Best Deals of 2024</div>
+  <div class="hero-badge">Best Deals of 2024</div>
   <h1>All SIM Operators Best Offers in One Place</h1>
   <p>Find the best internet, voice & combo packages from Banglalink, Grameenphone, Robi & Airtel. Compare and save more!</p>
   <div class="sim-tabs">
-    <button class="sim-tab active" onclick="scrollToSim('featured')"><span>⭐</span> Featured</button>
+    <button class="sim-tab active" onclick="scrollToSim('featured')">Featured</button>
     <button class="sim-tab" onclick="scrollToSim('banglalink')"><img src="${simImages.banglalink}" onerror="this.style.display='none'"> Banglalink</button>
     <button class="sim-tab" onclick="scrollToSim('grameenphone')"><img src="${simImages.grameenphone}" onerror="this.style.display='none'"> GP</button>
     <button class="sim-tab" onclick="scrollToSim('robi')"><img src="${simImages.robi}" onerror="this.style.display='none'"> Robi</button>
@@ -680,7 +707,7 @@ body {
 </section>
 <section class="section" id="featured">
   <div class="container">
-    <h2 class="section-title">⭐ Featured Offers</h2>
+    <h2 class="section-title">Featured Offers</h2>
     <p class="section-subtitle">Most popular packages chosen by our users</p>
     <div class="offers-grid">
       ${featuredOffers.map(o => renderOfferCard(o, true)).join('')}
@@ -692,7 +719,7 @@ body {
     <div class="sim-header">
       <img src="${simImages.banglalink}" alt="Banglalink" onerror="this.style.display='none'">
       <div>
-        <h3>🔶 Banglalink Offers</h3>
+        <h3>Banglalink Offers</h3>
         <p>Best Banglalink internet & combo packages</p>
       </div>
     </div>
@@ -706,7 +733,7 @@ body {
     <div class="sim-header">
       <img src="${simImages.grameenphone}" alt="Grameenphone" onerror="this.style.display='none'">
       <div>
-        <h3>💙 Grameenphone Offers</h3>
+        <h3>Grameenphone Offers</h3>
         <p>Latest GP internet, voice & bundle packs</p>
       </div>
     </div>
@@ -720,7 +747,7 @@ body {
     <div class="sim-header">
       <img src="${simImages.robi}" alt="Robi" onerror="this.style.display='none'">
       <div>
-        <h3>💜 Robi Offers</h3>
+        <h3>Robi Offers</h3>
         <p>Robi & Airtel combined best deals</p>
       </div>
     </div>
@@ -734,7 +761,7 @@ body {
     <div class="sim-header">
       <img src="${simImages.airtel}" alt="Airtel" onerror="this.style.display='none'">
       <div>
-        <h3>❤️ Airtel Offers</h3>
+        <h3>Airtel Offers</h3>
         <p>Exclusive Airtel packages for you</p>
       </div>
     </div>
@@ -763,14 +790,14 @@ body {
     </div>
   </div>
   <div class="footer-bottom">
-    <p>© 2024 SIM Offers BD. All rights reserved. | Not affiliated with any operator.</p>
+    <p>2024 SIM Offers BD. All rights reserved. | Not affiliated with any operator.</p>
   </div>
 </footer>
 <div class="chat-widget">
   <div class="chat-bubble" onclick="openChat()">💬</div>
 </div>
 <div class="chat-box" id="chatBox">
-  <div class="chat-head">💬 Live Support <button onclick="closeChat()">✕</button></div>
+  <div class="chat-head">Live Support <button onclick="closeChat()">✕</button></div>
   <div class="chat-body" id="chatBody">
     <div class="chat-login" id="chatLogin">
       <h4 style="margin-bottom:16px;color:var(--text)">Get Help</h4>
@@ -851,50 +878,29 @@ socket.on('newMsg',(m)=>{
 </html>`);
 });
 
-function renderOfferCard(offer, featured = false) {
-  return `
-    <div class="offer-card ${featured ? 'featured' : ''}">
-      <div class="offer-sim">
-        <img src="${offer.image}" alt="${offer.sim}" onerror="this.style.display='none'">
-        <span>${offer.sim}</span>
-      </div>
-      <div class="offer-title">${offer.title}</div>
-      <div class="offer-desc">${offer.description}</div>
-      <div class="offer-features">
-        <div class="offer-feature"><span class="icon">📱</span> ${offer.data}</div>
-        <div class="offer-feature"><span class="icon">📞</span> ${offer.minutes}</div>
-        <div class="offer-feature"><span class="icon">💬</span> ${offer.sms}</div>
-        <div class="offer-feature"><span class="icon">📅</span> ${offer.validity}</div>
-      </div>
-      <div class="offer-bottom">
-        <div class="offer-price">${offer.price}</div>
-        <div class="offer-validity">${offer.validity}</div>
-      </div>
-      <button class="offer-btn" onclick="alert('Offer: ${offer.title}\\nPrice: ${offer.price}\\nValidity: ${offer.validity}')">Get This Offer</button>
-    </div>`;
-}
-
-app.get('/api/offers', async (req, res) => {
+app.get('/api/offers', (req, res) => {
   try {
     const { sim, category } = req.query;
-    const filter = { active: true };
-    if (sim) filter.sim = sim;
-    if (category) filter.category = category;
-    const offers = await Offer.find(filter).sort({ featured: -1, createdAt: -1 }).lean();
+    let query = 'SELECT * FROM offers WHERE active = 1';
+    const params = [];
+    if (sim) { query += ' AND sim = ?'; params.push(sim); }
+    if (category) { query += ' AND category = ?'; params.push(category); }
+    query += ' ORDER BY featured DESC, createdAt DESC';
+    const offers = db.prepare(query).all(...params);
     res.json(offers);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch offers' });
   }
 });
 
-app.get('/api/msgs/:email', async (req, res) => {
+app.get('/api/msgs/:email', (req, res) => {
   try {
-    const msgs = await Message.find({
-      $or: [
-        { sender: req.params.email, receiver: 'admin@simoffers.com' },
-        { sender: 'admin@simoffers.com', receiver: req.params.email }
-      ]
-    }).sort({ timestamp: 1 }).lean();
+    const msgs = db.prepare(`
+      SELECT * FROM messages 
+      WHERE (sender = ? AND receiver = 'admin@simoffers.com') 
+         OR (sender = 'admin@simoffers.com' AND receiver = ?)
+      ORDER BY timestamp ASC
+    `).all(req.params.email, req.params.email);
     res.json(msgs);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch messages' });
@@ -905,7 +911,7 @@ app.post('/api/admin/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-    const user = await User.findOne({ email, isAdmin: true });
+    const user = db.prepare('SELECT * FROM users WHERE email = ? AND isAdmin = 1').get(email);
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
@@ -915,15 +921,11 @@ app.post('/api/admin/login', async (req, res) => {
   }
 });
 
-app.get('/api/admin/users', async (req, res) => {
+app.get('/api/admin/users', (req, res) => {
   try {
-    const users = await User.find({ isAdmin: false }).sort({ lastSeen: -1 }).lean();
+    const users = db.prepare('SELECT * FROM users WHERE isAdmin = 0 ORDER BY lastSeen DESC').all();
     for (let u of users) {
-      u.unreadCount = await Message.countDocuments({
-        sender: u.email,
-        receiver: 'admin@simoffers.com',
-        seen: false
-      });
+      u.unreadCount = db.prepare("SELECT COUNT(*) as count FROM messages WHERE sender = ? AND receiver = 'admin@simoffers.com' AND seen = 0").get(u.email).count;
     }
     res.json(users);
   } catch (err) {
@@ -1025,8 +1027,8 @@ body{font-family:'Hind Siliguri',sans-serif;background:#0F0F23;height:100vh;over
 <div class="app" id="app">
   <div class="app-layout">
     <div class="sidebar" id="sidebar">
-      <div class="sidebar-header"><h2>💬 Conversations</h2><button class="logout-btn" onclick="ChatAdmin.logout()">Logout</button></div>
-      <div class="search-bar"><input type="text" id="searchInput" placeholder="🔍 Search users..." oninput="ChatAdmin.filterUsers()"></div>
+      <div class="sidebar-header"><h2>Conversations</h2><button class="logout-btn" onclick="ChatAdmin.logout()">Logout</button></div>
+      <div class="search-bar"><input type="text" id="searchInput" placeholder="Search users..." oninput="ChatAdmin.filterUsers()"></div>
       <div class="user-list" id="userList"><div class="empty-state"><div class="empty-icon">📭</div><p>No conversations</p></div></div>
     </div>
     <div class="chat-area">
@@ -1053,51 +1055,41 @@ setInterval(()=>{if(ChatAdmin.isLoggedIn)ChatAdmin.loadUsers()},30000);
 });
 
 io.on('connection', (socket) => {
-  console.log('🔌 New connection:', socket.id);
+  console.log('New connection:', socket.id);
   socket.on('register', async (data) => {
     try {
       socket.userData = data;
-      let user = await User.findOne({ email: data.email });
+      let user = db.prepare('SELECT * FROM users WHERE email = ?').get(data.email);
       if (!user) {
         const hash = await bcrypt.hash('default123', 10);
-        user = await User.create({ name: data.name, email: data.email, password: hash });
+        db.prepare('INSERT INTO users (name, email, password) VALUES (?, ?, ?)').run(data.name, data.email, hash);
       }
-      await User.updateOne({ email: data.email }, { $set: { isOnline: true, lastSeen: new Date() } });
+      db.prepare("UPDATE users SET isOnline = 1, lastSeen = datetime('now') WHERE email = ?").run(data.email);
       io.emit('userStatus', { email: data.email, online: true });
     } catch (err) {
       console.error('Register error:', err.message);
     }
   });
-  socket.on('sendMsg', async (data) => {
+  socket.on('sendMsg', (data) => {
     try {
-      const msg = await Message.create({
-        sender: data.sender,
-        receiver: data.receiver,
-        message: data.message,
-        type: data.type || 'text'
-      });
+      const result = db.prepare("INSERT INTO messages (sender, receiver, message, type) VALUES (?, ?, ?, ?)").run(data.sender, data.receiver, data.message, data.type || 'text');
+      const msg = db.prepare('SELECT * FROM messages WHERE id = ?').get(result.lastInsertRowid);
       io.emit('newMsg', msg);
     } catch (err) {
       console.error('Send message error:', err.message);
     }
   });
-  socket.on('markRead', async (data) => {
+  socket.on('markRead', (data) => {
     try {
-      await Message.updateMany(
-        { sender: data.user, receiver: 'admin@simoffers.com', seen: false },
-        { $set: { seen: true } }
-      );
+      db.prepare("UPDATE messages SET seen = 1 WHERE sender = ? AND receiver = 'admin@simoffers.com' AND seen = 0").run(data.user);
     } catch (err) {
       console.error('Mark read error:', err.message);
     }
   });
-  socket.on('disconnect', async () => {
+  socket.on('disconnect', () => {
     if (socket.userData) {
       try {
-        await User.updateOne(
-          { email: socket.userData.email },
-          { $set: { isOnline: false, lastSeen: new Date() } }
-        );
+        db.prepare("UPDATE users SET isOnline = 0, lastSeen = datetime('now') WHERE email = ?").run(socket.userData.email);
         io.emit('userStatus', { email: socket.userData.email, online: false });
       } catch (err) {
         console.error('Disconnect error:', err.message);
@@ -1107,8 +1099,8 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log('🚀 Server running on http://localhost:' + PORT);
-  console.log('📧 Admin panel: http://localhost:' + PORT + '/messenger');
-  console.log('📧 Admin Email: admin@simoffers.com');
-  console.log('🔑 Admin Password: Admin@2024!');
+  console.log('Server running on http://localhost:' + PORT);
+  console.log('Admin panel: http://localhost:' + PORT + '/messenger');
+  console.log('Admin Email: admin@simoffers.com');
+  console.log('Admin Password: Admin@2024!');
 });
